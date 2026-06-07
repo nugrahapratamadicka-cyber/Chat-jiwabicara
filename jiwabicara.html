@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <title>Kanal Khusus · Jiwabicara Admin</title>
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box;}
+        body{background:#0a0f1c;font-family:system-ui;padding:24px;color:#ecf3ff;}
+        .dashboard{max-width:1400px;margin:0 auto;}
+        .header{display:flex;justify-content:space-between;margin-bottom:28px;border-bottom:1px solid #2a3a55;padding-bottom:16px;flex-wrap:wrap;}
+        h1{font-size:1.7rem;background:linear-gradient(120deg,#e4ecff,#a2c2ff);-webkit-background-clip:text;background-clip:text;color:transparent;}
+        .badge{background:#1e2f46;padding:6px 14px;border-radius:80px;}
+        .action-bar{display:flex;gap:12px;margin-bottom:28px;flex-wrap:wrap;}
+        .action-bar button{background:#19273e;border:none;padding:8px 20px;border-radius:32px;color:#d2e0ff;cursor:pointer;}
+        .pending-count{background:#d63e5e;color:white;padding:4px 12px;border-radius:100px;}
+        .requests-grid{display:flex;flex-direction:column;gap:24px;}
+        .card{background:#111a2bdd;border-radius:32px;border:1px solid #2c405e;padding:20px;}
+        .card-header{display:flex;justify-content:space-between;font-size:0.7rem;color:#90a9ce;margin-bottom:14px;}
+        .user-quote{background:#0f172a;padding:14px;border-radius:24px;margin:12px 0;border-left:4px solid #5f8eff;}
+        .analysis{display:flex;gap:20px;font-size:0.8rem;background:#0a1020;padding:8px 14px;border-radius:50px;width:fit-content;margin:12px 0;}
+        .recommend{background:#232e48;border-radius:32px;padding:8px 16px;margin:12px 0;}
+        .admin-reply{margin-top:16px;display:flex;gap:12px;flex-wrap:wrap;}
+        .admin-reply input{flex:3;background:#010a1a;border:1px solid #3c5880;border-radius:60px;padding:12px;color:white;}
+        .admin-reply button{background:#2d6a4f;padding:10px 20px;border-radius:40px;border:none;color:white;cursor:pointer;}
+        .footer-note{margin-top:36px;font-size:0.7rem;text-align:center;color:#5d749b;}
+        hr{border-color:#1f324b;margin:16px 0;}
+    </style>
+</head>
+<body>
+<div class="dashboard">
+    <div class="header">
+        <div><h1>📡 KANAL KHUSUS · LAPORAN DARI SISTEM JIWABICARA</h1><p>Kanal aktif – Anda mengkomando | Auto-Answer: 60 detik</p></div>
+        <div class="badge">🧠 pemilik hikmah</div>
+    </div>
+    <div class="action-bar">
+        <button id="exportBtn">📎 Ekspor Semua</button>
+        <button id="deleteOldBtn" style="background:#6b2e3e;">🗑️ Hapus Lama (>7 hari)</button>
+        <button id="refreshBtn">🔄 Refresh Manual</button>
+        <span id="pendingBadge" class="pending-count">Pending: 0</span>
+        <button id="requestNotifyPermBtn" style="background:#3f6bc0;">🔔 Aktifkan Notifikasi Browser</button>
+    </div>
+    <div id="requestsContainer" class="requests-grid"><div style="text-align:center;padding:40px;">Memuat laporan...</div></div>
+    <div class="footer-note">⚡ Setiap jawaban langsung tampil di sistem. Notifikasi browser akan muncul jika diizinkan.</div>
+</div>
+<script>
+    const STORAGE_KEY = 'jiwabicara_pending_requests';
+    let currentRequests = [];
+    let lastNotifCount = 0;
+
+    function loadRequests() { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
+    function saveRequests(requests) { localStorage.setItem(STORAGE_KEY, JSON.stringify(requests)); window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY, newValue: JSON.stringify(requests) })); renderRequests(); }
+
+    function renderRequests() {
+        const container = document.getElementById('requestsContainer');
+        const pendingCount = currentRequests.filter(r => r.adminAnswer === null).length;
+        document.getElementById('pendingBadge').innerText = `Pending: ${pendingCount}`;
+        if(!currentRequests.length) { container.innerHTML = '<div style="padding:40px;text-align:center;">✨ Tidak ada curahan hati.</div>'; return; }
+        container.innerHTML = '';
+        [...currentRequests].sort((a,b)=>b.timestamp-a.timestamp).forEach(req => {
+            const isAnswered = req.adminAnswer !== null;
+            const dateStr = new Date(req.timestamp).toLocaleString();
+            const autoNote = req.autoAnswered ? ' (auto-dijawab sistem)' : '';
+            const card = document.createElement('div'); card.className = 'card';
+            card.innerHTML = `
+                <div class="card-header"><span>🕒 ${dateStr}</span><span class="status-badge" style="background:${isAnswered?'#1f5e3a':'#a1423a'}">${isAnswered?'Terjawab':'Menunggu Anda'}</span></div>
+                <div class="user-quote">💬 “${escapeHtml(req.userText)}”</div>
+                <div class="analysis"><span>🎭 Sentimen: ${req.sentiment?.sentiment||'netral'}</span><span>❤️ Kebutuhan: ${req.sentiment?.need||'validasi'}</span></div>
+                <div class="recommend">✨ REKOMENDASI SISTEM: <strong>${escapeHtml(req.systemRecommendation||'Aku meresapi.')}</strong></div>
+                ${isAnswered ? `<div>✅ Jawaban ${autoNote}: <em>“${escapeHtml(req.adminAnswer)}”</em></div>` : `
+                    <div class="admin-reply"><input type="text" id="answerInput-${req.id}" placeholder="Jawaban impactful..." value="${escapeHtml(req.systemRecommendation||'')}"><button class="submit-answer" data-id="${req.id}">✍️ Kirim Jawaban</button></div>
+                `}
+                <hr>
+            `;
+            container.appendChild(card);
+        });
+        document.querySelectorAll('.submit-answer').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const id = btn.dataset.id;
+                const inp = document.getElementById(`answerInput-${id}`);
+                const answer = inp.value.trim();
+                if(!answer) return alert('Jawaban tidak boleh kosong!');
+                const idx = currentRequests.findIndex(r=>r.id===id);
+                if(idx!==-1 && !currentRequests[idx].adminAnswer) {
+                    currentRequests[idx].adminAnswer = answer;
+                    currentRequests[idx].answeredAt = Date.now();
+                    saveRequests(currentRequests);
+                } else alert('Pesan sudah dijawab atau tidak ditemukan.');
+            });
+        });
+    }
+
+    function escapeHtml(s) { if(!s) return ''; return s.replace(/[&<>]/g, function(m){ if(m==='&') return '&amp;'; if(m==='<') return '&lt;'; if(m==='>') return '&gt;'; return m;}); }
+
+    function checkNewPending() {
+        const newReqs = loadRequests();
+        const newPending = newReqs.filter(r => r.adminAnswer === null);
+        const oldPending = currentRequests.filter(r => r.adminAnswer === null);
+        if(newPending.length > oldPending.length) {
+            // Ada curhatan baru
+            const newest = newPending.find(n => !oldPending.find(o=>o.id===n.id));
+            if(newest && Notification.permission === 'granted') {
+                new Notification('📢 Curhatan baru masuk', { body: `"${newest.userText.substring(0,80)}"`, icon: 'https://ntfy.sh/static/img/logo.png' });
+            }
+        }
+        currentRequests = newReqs;
+        renderRequests();
+    }
+
+    function requestNotificationPerm() {
+        if(Notification.permission === 'default') Notification.requestPermission().then(perm => { if(perm==='granted') alert('Notifikasi browser aktif!'); });
+        else if(Notification.permission === 'granted') alert('Notifikasi sudah aktif.');
+        else alert('Izin notifikasi ditolak oleh browser.');
+    }
+
+    function exportAll() { const dataStr = JSON.stringify(currentRequests, null, 2); const blob = new Blob([dataStr], {type:'application/json'}); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `jiwabicara_export_${new Date().toISOString()}.json`; a.click(); URL.revokeObjectURL(blob); }
+    function deleteOld() { const sevenDays = Date.now() - 7*24*3600000; const newReqs = currentRequests.filter(r => r.timestamp > sevenDays); if(newReqs.length !== currentRequests.length) { currentRequests = newReqs; saveRequests(currentRequests); alert(`Dihapus ${currentRequests.length-newReqs.length} data lama.`); } else alert('Tidak ada data lebih dari 7 hari.'); }
+    function refreshManual() { currentRequests = loadRequests(); renderRequests(); }
+
+    setInterval(checkNewPending, 2000);
+    document.getElementById('exportBtn').onclick = exportAll;
+    document.getElementById('deleteOldBtn').onclick = deleteOld;
+    document.getElementById('refreshBtn').onclick = refreshManual;
+    document.getElementById('requestNotifyPermBtn').onclick = requestNotificationPerm;
+    currentRequests = loadRequests();
+    renderRequests();
+    if(Notification.permission === 'default') Notification.requestPermission();
+    window.addEventListener('storage', (e) => { if(e.key===STORAGE_KEY) checkNewPending(); });
+</script>
+</body>
+</html>
